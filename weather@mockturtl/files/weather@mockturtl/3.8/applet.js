@@ -67,6 +67,7 @@ Openweather: max 60 calls per minute, Temporary ban and no charge
 const DATA_SERVICE = {
   OPEN_WEATHER_MAP: "OpenWeatherMap",
   DARK_SKY: "DarkSky",
+  BBC: "BBC"
 }
 
 // Schema keys
@@ -208,6 +209,7 @@ const darkSky = AppletDir.darkSky;
 const openWeatherMap = AppletDir.openWeatherMap;
 // Location lookup service
 const ipApi = AppletDir.ipApi;
+const bbc = AppletDir.bbc;
 
 //----------------------------------------------------------------
 //
@@ -386,6 +388,23 @@ MyApplet.prototype = {
           else {  // No response
               this.log.Error("Error: No Response from API");
               reject(null);
+          }   
+        });
+    });
+    return json;
+  },
+
+  LoadPayloadAsync: async function(query) {
+    let json = await new Promise((resolve, reject) => {
+      let message = Soup.Message.new('GET', query);
+      this._httpSession.queue_message(message, (session, message) => {
+          if (message) {
+            this.log.Debug("API full response: " + message.response_body.data.toString());
+            resolve(message.response_body.data);     
+          }
+          else {  // No response
+            this.log.Error("Error: No Response from API");
+            reject(null);
           }   
         });
     });
@@ -618,19 +637,21 @@ MyApplet.prototype = {
           // No City and Country information, fetch from geolocation api
           //
           this.provider = new darkSky.DarkSky(this);
-          refreshResult = await this.provider.GetWeather();
           break;
         case DATA_SERVICE.OPEN_WEATHER_MAP:
           //
           //  No TZ information
           //
           this.provider = new openWeatherMap.OpenWeatherMap(this);
-          refreshResult = await this.provider.GetWeather();
+          break;
+        case DATA_SERVICE.BBC:
+          this.provider = new bbc.BBC(this);
           break;
         default:
           return;
       }
 
+      refreshResult = await this.provider.GetWeather();
       if (!refreshResult) {           // Failed
         this.log.Error("Unable to obtain Weather Information");
         this.lastUpdated = null;

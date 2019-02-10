@@ -19,7 +19,8 @@
   , "options":
     { 
       "OpenWeatherMap (no key needed)": "OpenWeatherMap",
-      "DarkSky": "DarkSky"
+      "DarkSky": "DarkSky",
+      "BBC": "BBC"
     }
   },
   "apiKey":
