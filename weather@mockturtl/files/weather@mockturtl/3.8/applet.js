@@ -794,6 +794,9 @@ MyApplet.prototype = {
         case DATA_SERVICE.DARK_SKY:
           this._currentWeatherLocation.url = "https://darksky.net/forecast/" + this.weather.coord.lat + "," + this.weather.coord.lon;
           break;
+        case DATA_SERVICE.BBC:
+          this._currentWeatherLocation.url = "https://www.bbc.co.uk/weather/" + this._location;
+          break;
         default:
           this._currentWeatherLocation.url = null;
       }
