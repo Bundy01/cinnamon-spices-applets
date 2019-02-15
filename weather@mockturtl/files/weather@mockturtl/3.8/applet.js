@@ -162,19 +162,23 @@ function Log(_instanceId) {
 
 Log.prototype = {
   Print: function(message) {
-    let msg = UUID + "#" + this.ID + ": " + message.toString();
-    let debug = "";
-    if (this.debug) {
-      debug = this.GetErrorLine();
-      global.log(msg, '\n', "On Line:", debug);
-    }
-    else {
-      global.log(msg);
-    }   
+    if (message != null || message != "") {
+      let msg = UUID + "#" + this.ID + ": " + message.toString();
+      let debug = "";
+      if (this.debug) {
+        debug = this.GetErrorLine();
+        global.log(msg, '\n', "On Line:", debug);
+      }
+      else {
+        global.log(msg);
+      } 
+    }  
   },
 
   Error: function(error) {
-    global.logError(UUID + "#" + this.ID + ": " + error.toString(), '\n', "On Line:", this.GetErrorLine());
+    if (error != null || error != "") {
+      global.logError(UUID + "#" + this.ID + ": " + error.toString(), '\n', "On Line:", this.GetErrorLine());
+    }
   },
 
   Debug: function(message) {
@@ -210,6 +214,7 @@ const openWeatherMap = AppletDir.openWeatherMap;
 // Location lookup service
 const ipApi = AppletDir.ipApi;
 const bbc = AppletDir.bbc;
+
 
 //----------------------------------------------------------------
 //
@@ -399,7 +404,7 @@ MyApplet.prototype = {
       let message = Soup.Message.new('GET', query);
       this._httpSession.queue_message(message, (session, message) => {
           if (message) {
-            this.log.Debug("API full response: " + message.response_body.data.toString());
+            //this.log.Debug("API full response: " + message.response_body.data.toString());
             resolve(message.response_body.data);     
           }
           else {  // No response
@@ -637,21 +642,23 @@ MyApplet.prototype = {
           // No City and Country information, fetch from geolocation api
           //
           this.provider = new darkSky.DarkSky(this);
+          refreshResult = await this.provider.GetWeather();
           break;
         case DATA_SERVICE.OPEN_WEATHER_MAP:
           //
           //  No TZ information
           //
           this.provider = new openWeatherMap.OpenWeatherMap(this);
+          refreshResult = await this.provider.GetWeather();
           break;
         case DATA_SERVICE.BBC:
           this.provider = new bbc.BBC(this);
+          refreshResult = await this.provider.GetWeather();
           break;
         default:
           return;
       }
 
-      refreshResult = await this.provider.GetWeather();
       if (!refreshResult) {           // Failed
         this.log.Error("Unable to obtain Weather Information");
         this.lastUpdated = null;
@@ -795,20 +802,27 @@ MyApplet.prototype = {
       // gettext can't see these inline
       let sunriseText = "";
       let sunsetText = "";
-      if (this.weather.sunrise != null && this.weather.sunset != null) {
-        if (this._showSunrise) {
+      if (this._showSunrise) {
+        if (this.weather.sunrise != null) {
           sunriseText = _('Sunrise');
-          sunsetText = _('Sunset');
-          if (this.weather.location.timeZone != null) {     //have TZ, en-GB returns time in the correct format
-              let sunrise = this.weather.sunrise.toLocaleString("en-GB", {timeZone: this.weather.location.timeZone, hour: "2-digit", minute: "2-digit"});
-              let sunset = this.weather.sunset.toLocaleString("en-GB", {timeZone: this.weather.location.timeZone, hour: "2-digit", minute: "2-digit"});
-              sunriseText = (sunriseText + ': ' + this.timeToUserUnits(sunrise));
-              sunsetText = (sunsetText + ': ' + this.timeToUserUnits(sunset));
+          if (this.weather.location.timeZone != null) {
+            let sunrise = this.weather.sunrise.toLocaleString("en-GB", {timeZone: this.weather.location.timeZone, hour: "2-digit", minute: "2-digit"});
+            sunriseText = (sunriseText + ': ' + this.timeToUserUnits(sunrise));
           }
-          else {   // else We assume that System TZ and Location TZ is same, covers 95% of users   
+          else {
             sunriseText = (sunriseText + ': ' + this.timeToUserUnits(this.weather.sunrise.toLocaleFormat('%H:%M')));
+          }
+        }
+
+        if (this.weather.sunset != null) {
+          sunsetText = _('Sunset');
+          if (this.weather.location.timeZone != null) {
+            let sunset = this.weather.sunset.toLocaleString("en-GB", {timeZone: this.weather.location.timeZone, hour: "2-digit", minute: "2-digit"});
+            sunsetText = (sunsetText + ': ' + this.timeToUserUnits(sunset));
+          }
+          else {
             sunsetText = (sunsetText + ': ' + this.timeToUserUnits(this.weather.sunset.toLocaleFormat('%H:%M')));
-          }         
+          }
         }
       }
       
@@ -842,15 +856,24 @@ MyApplet.prototype = {
             comment = _(this.capitalizeFirstLetter(forecastData.condition.description));
           }
         }
-        let dayName = forecastData.dateTime;
-        if (this.weather.location.timeZone != null) {
-           this.log.Debug(dayName.toLocaleString("en-GB", {timeZone: this.weather.location.timeZone}));
-           dayName = _(dayName.toLocaleString("en-GB", {timeZone: this.weather.location.timeZone, weekday: "long"}));
+
+        let dayName;
+        // Not DateTime information
+        if (!forecastData.dateTime) {
+          dayName = _(forecastData.dayName);
         }
         else {
-          dayName.setMilliseconds(dayName.getMilliseconds() + (this.weather.location.tzOffset * 1000));
-          dayName = _(this.getDayName(dayName.getUTCDay()));
-        }       
+          dayName = forecastData.dateTime;
+          if (this.weather.location.timeZone != null) {
+            this.log.Debug(dayName.toLocaleString("en-GB", {timeZone: this.weather.location.timeZone}));
+            dayName = _(dayName.toLocaleString("en-GB", {timeZone: this.weather.location.timeZone, weekday: "long"}));
+          }
+          else {
+            dayName.setMilliseconds(dayName.getMilliseconds() + (this.weather.location.tzOffset * 1000));
+            dayName = _(this.getDayName(dayName.getUTCDay()));
+          }       
+        }
+        
         
         forecastUi.Day.text = dayName;
         forecastUi.Temperature.text = first_temperature + ' ' + '\u002F' + ' ' + second_temperature + ' ' + this.unitToUnicode();
@@ -860,7 +883,7 @@ MyApplet.prototype = {
       return true;
     }
     catch(e) {
-      this.log.Error("DisplayForecastError" + e);
+      this.log.Error("DisplayForecastError: " + e);
       return false;
     }
   },

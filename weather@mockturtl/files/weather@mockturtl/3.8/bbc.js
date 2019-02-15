@@ -6,20 +6,32 @@ function BBC(app) {
     this.forecastQuery = "https://weather-broker-cdn.api.bbci.co.uk/en/forecast/rss/3day/";
     this.weatherQuery = "https://weather-broker-cdn.api.bbci.co.uk/en/observation/rss/";
 
+    this.parser = new Marknote.marknote.Parser();
 
-    this.GetWeather = function() {
-        GetData(weatherQuery, this.ParseCurrent);
-        GetData(forecastQuery, this.ParseForecast);
+    this.currentOld = false;
+    this.conditionNA = false;
+
+
+    this.GetWeather = async function() {
+        let currentResult = await this.GetData(this.weatherQuery, this.ParseCurrent);
+        let forecastResult = await this.GetData(this.forecastQuery, this.ParseForecast);
+        if (currentResult && forecastResult) {
+          return true;
+        }
+        else {
+            app.log.Error("BBC: Could not get Weather information");
+            return false;
+        }
     };
 
     this.GetData = async function(baseUrl, parseFunction) {
         let query = this.ConstructQuery(baseUrl);
-        let html;
+        let rss;
         if (query != null) {
             app.log.Debug("Query: " + query);
             try {
-                html = await app.LoadPayloadAsync(query);
-                if (html == null) {
+                rss = await app.LoadPayloadAsync(query);
+                if (rss == null) {
                     app.showError(app.errMsg.label.service, app.errMsg.desc.noResponse)
                     return false;                 
                 }
@@ -28,304 +40,286 @@ function BBC(app) {
                 app.log.Error("Unable to call API:", e);
                 return false;
             }
-
-            if (html.cod == 200) {   // Request Success
-                return parseFunction(html, this);
-            }
-            else {
-                //this.HandleResponseErrors(html);
+              let doc = this.parser.parse(rss);
+              if (!doc) {
+                app.log.Error("BBC: Can't parse RSS payload")
                 return false;
-            }
+              }
+              else {
+                return parseFunction(doc, this);
+              }
+
         }
         else {
-
+          app.log.Error("BBC: Could not construct query.");
+          return false;
         }       
     };
 
 
 
-    this.ParseCurrent = function(html) {
+    this.ParseCurrent = function(doc, self) {
+      try {
+        let mainTitle = doc.getRootElement().getChildElement("channel").getChildElement("title").getText();
+        let item = doc.getRootElement().getChildElement("channel").getChildElement("item");
+        let desc = item.getChildElement("description").getText();
+        let title = item.getChildElement("title").getText();
+        let loc = item.getChildElement("georss:point").getText();
+        let dateText = item.getChildElement("pubDate").getText();
 
+        // Parsing
+        
+        let date = new Date(dateText);
+        // if observation is older than 3 hours, use forecast instead
+        if (date < new Date().setHours(new Date().getHours() - 3)) {
+          self.currentOld = true;
+          return true;
+        }
+        // Set tzOffset to 0 explicitly to avoid conversion, sunrise times are already in localtime
+        app.weather.location.tzOffset = 0;
+        app.weather.location.city = mainTitle.split(" ")[6].replace(",", "").trim();
+        app.weather.location.country = mainTitle.split(" ")[7].trim();
+        app.weather.dateTime = date;
+        app.weather.coord.lat = loc.split(" ")[0];
+        app.weather.coord.lon = loc.split(" ")[1];
+        app.weather.wind.speed = self.MPHtoMPS(desc.split("Wind Speed: ")[1].split(" ")[0].replace("mph,", ""));
+        app.weather.wind.degree = self.DirectionToDegrees(desc.split("Wind Direction: ")[1].split(",")[0]);
+        app.weather.main.temperature = self.CtoK(desc.split("Temperature: ")[1].split(" ")[0].replace("\u00B0" + "C", ""));
+        app.weather.main.pressure = desc.split("Pressure: ")[1].split(",")[0].replace("mb", "");
+        app.weather.main.humidity = desc.split("Humidity: ")[1].split(",")[0].replace("%", "");
+        let condition = title.split(": ")[1].split(",")[0].trim();
+        if (condition == "Not available") {
+          self.conditionNA = true;
+          app.weather.condition.main = condition;
+          app.weather.condition.description = condition;
+          app.weather.condition.icon = app.weatherIconSafely(condition, self.ResolveIcon);
+        }
+        else {
+          app.weather.condition.main = condition;
+          app.weather.condition.description = condition;
+          app.weather.condition.icon = app.weatherIconSafely(condition, self.ResolveIcon);
+        }
+
+        return true;
+      } 
+      catch(e) {
+        app.log.Error("BBC: Parsing error: " + e);
+        return false;
+      }    
     };
 
-    this.ParseForecast = function(html) {
+    this.ParseForecast = function(doc, self) {
+      let channel = doc.getRootElement().getChildElement("channel");
+      let items = channel.getChildElements("item");
+      
+      try {
+        let forecast;
+        for (let i = 0; i < 3; i++) {
+          let item = items[i];
+          let desc = item.getChildElement("description").getText();
+          let title = item.getChildElement("title").getText();
+          forecast = { 
+            dateTime: null,             //Required
+            dayName: null,
+            main: {
+              temp: null,
+              temp_min: null,           //Required
+              temp_max: null,           //Required
+              pressure: null,
+              sea_level: null,
+              grnd_level: null,
+              humidity: null,
+            },
+            condition: {
+              id: null,
+              main: null,               //Required
+              description: null,        //Required
+              icon: null,               //Required
+            },
+            clouds: null,
+            wind: {
+              speed: null,
+              deg: null,
+            }
+          }
+        
+          if (i == 0) {
+            if (desc.includes("Sunrise")) {
+              let hours = desc.split("Sunrise: ")[1].split(" ")[0].split(":")[0];
+              let minutes = desc.split("Sunrise: ")[1].split(" ")[0].split(":")[1];
+              let date = new Date();
+              date.setUTCHours(hours, minutes, 0, 0);
+              app.weather.sunrise = date;
+            }
+            if (desc.includes("Sunset")) {
+              let sunsetHours = desc.split("Sunset: ")[1].split(" ")[0].split(":")[0];
+              let sunsetMinutes = desc.split("Sunset: ")[1].split(" ")[0].split(":")[1];
+              let date = new Date();
+              date.setUTCHours(sunsetHours, sunsetMinutes, 0, 0);
+              app.weather.sunset = date;
+            }
+            
+            if (self.conditionNA) {
+              let condition = title.split(": ")[1].split(",")[0].trim();
+              app.weather.condition.main = condition;
+              app.weather.condition.description = condition;
+              app.weather.condition.icon = app.weatherIconSafely(condition, self.ResolveIcon);
+            }
+          }
 
+          if (desc.includes("Minimum Temperature")) {
+            forecast.main.temp_min = self.CtoK(desc.split("Minimum Temperature: ")[1].split(" ")[0].replace("\u00B0" + "C", ""));
+          }
+
+          if (desc.includes("Maximum Temperature")) {
+            forecast.main.temp_max = self.CtoK(desc.split("Maximum Temperature: ")[1].split(" ")[0].replace("\u00B0" + "C", ""));
+          }
+          
+          // Have to introduce a new field as BCC gives you the day names already
+          
+          forecast.dayName = title.split(": ")[0];
+          forecast.condition.main = title.split(": ")[1].split(",")[0];
+          forecast.condition.description = title.split(": ")[1].split(",")[0];
+          forecast.condition.icon = app.weatherIconSafely(title.split(": ")[1].split(",")[0], self.ResolveIcon);
+          app.forecasts.push(forecast);
+        }
+        return true;
+      }
+      catch (e) {
+        app.log.Error("BBC: Parsing failed: " + e);
+        return false;
+      }
+    };
+
+    this.MPHtoMPS = function(mph) {
+      return (mph * 0.44704);
     };
 
     this.ConstructQuery = function(query) {
         return query + app._location;
     };
-};
 
+    this.DirectionToDegrees = function(text) {
+      switch(text) {
+        case "Northerly":
+          return 0;
+        case "North North Easterly" :
+          return 22.5;
+        case "North Easterly" :
+          return 45;
+        case "East North Easterly" :
+          return 67.5;
+        case "Easterly" :
+          return 90;
+        case "East South Easterly" :
+          return 112.5;
+        case "South Easterly":
+          return 135;
+        case "South South Easterly" :
+          return 157.5;
+        case "Southerly" :
+          return 180;
+        case "South South Westerly" :
+          return 202.5;
+        case "South Westerly" :
+          return 225;
+        case "West South Westerly" :
+          return 247.5;
+        case "Westerly" :
+          return 270;
+        case "West North Westerly" :
+          return 292.5;
+        case "North Westerly" :
+          return 315;
+        case "North North Westerly" :
+          return 337.5;
+      }
+    };
 
-/*
-xDriverBBC.prototype = {
-    __proto__: wxDriver.prototype,
-  
-    drivertype: 'BBC',
-    maxDays: 3,
-    linkText: 'www.bbc.co.uk/weather',
-  
-    // these will be dynamically reset when data is loaded
-    linkURL: 'http://www.bbc.co.uk/weather/',
-  
-    _baseURL: 'https://weather-broker-cdn.api.bbci.co.uk/en/',
-  
-    // initialise the driver
-    _bbcinit: function(stationID) {
-      this._init(stationID);
-      this.capabilities.meta.region =  false;
-      this.capabilities.cc.feelslike = false;
-      this.capabilities.cc.obstime = false;
-    },
-  
-    refreshData: function(deskletObj) {
-      // reset the data object
-      this._emptyData();
-      this.linkURL = 'http://www.bbc.co.uk/weather';
-  
-      // process the three day forecast
-      let a = this._getWeather(this._baseURL + 'forecast/rss/3day/' + this.stationID, function(weather) {
-        if (weather) {
-          this._load_forecast(weather);
-        }
-        // get the main object to update the display
-        deskletObj.displayForecast();
-        deskletObj.displayMeta();
-      });
-  
-      // process current observations
-      let b = this._getWeather(this._baseURL + 'observation/rss/' + this.stationID, function(weather) {
-        if (weather) {
-          this._load_observations(weather);
-        }
-        // get the main object to update the display
-        deskletObj.displayCurrent();
-      });
-  
-    },
-  
-    // process the rss for a 3dayforecast and populate this.data
-    _load_forecast: function (rss) {
-      if (!rss) {
-        this.data.status.forecast = BBCWX_SERVICE_STATUS_ERROR;
-        this.data.status.meta = BBCWX_SERVICE_STATUS_ERROR;
-        return;
+    this.ResolveIcon = function(icon) {
+      icon = icon.toLowerCase().trim();
+      switch(icon) {
+        case "light rain":/* rain day */
+          return ['weather-rain', 'weather-showers-scattered', 'weather-freezing-rain']
+        case "heavy rain":/* rain night */
+          return ['weather-rain', 'weather-showers-scattered', 'weather-freezing-rain']
+        case "drizzle":/* rain night */
+          return ['weather-rain', 'weather-showers-scattered', 'weather-freezing-rain']
+
+        case "light rain shower":/* showers nigh*/
+          return ['weather-showers']
+        case "light rain showers":/* showers nigh*/
+          return ['weather-showers']
+        case "heavy rain shower":/* showers nigh*/
+          return ['weather-showers']
+        case "heavy rain showers":/* showers nigh*/
+          return ['weather-showers']
+        case "thundery shower":/* showers nigh*/
+          return ['weather-showers']
+        case "thundery showers":/* showers nigh*/
+          return ['weather-showers']
+        case "hail shower":/* showers nigh*/
+          return ['weather-showers']
+        case "hail showers":/* showers nigh*/
+          return ['weather-showers']
+        
+        case "sleet":/* rain day */
+          return ['weather-freezing-rain', 'weather-rain', 'weather-showers-scattered', ]
+        case "sleet shower":/* rain night */
+          return ['weather-freezing-rain', 'weather-rain', 'weather-showers-scattered', ]
+        case "sleet showers":/* rain night */
+          return ['weather-freezing-rain', 'weather-rain', 'weather-showers-scattered', ]
+
+        case "light snow shower":/* snow day*/
+          return ['weather-snow']
+        case "light snow showers":/* snow night */
+          return ['weather-snow']
+        case "light snow":/* snow night */
+          return ['weather-snow']
+        case "heavy snow shower":/* snow night */
+          return ['weather-snow']
+        case "heavy snow showers":/* snow night */
+          return ['weather-snow']
+        case "heavy snow shower":/* snow night */
+          return ['weather-snow']
+
+        case "mist":/* mist day */
+          return ['weather-fog']
+        case "fog":/* mist night */
+          return ['weather-fog']
+        case "hazy":
+          return ['weather-fog'];
+
+        case "grey cloud":/* broken clouds day */
+          return ['weather_overcast', 'weather-clouds', "weather-few-clouds"]
+        case "thick cloud":/* broken clouds night */
+          return ['weather_overcast', 'weather-clouds', "weather-few-clouds-night"]
+
+        case "sunny intervals":/* partly cloudy (night) */
+          return ['weather-few-clouds']
+        case "partly cloudy":/* partly cloudy (day) */
+          return ['weather-few-clouds']
+        case "white cloud":/* partly cloudy (night) */
+          return ['weather-few-clouds']
+        case "light cloud":/* partly cloudy (day) */
+          return ['weather-few-clouds']
+        case "clear sky":/* clear (night) */
+          return ['weather-clear']
+        case "sunny":/* sunny */
+
+          return ['weather-clear']
+        case "thunder storm":/* storm day */
+          return ['weather-storm']
+        case "thunderstorm":/* storm night */
+          return ['weather-storm']
+        case "sand storm":/* storm night */
+          return ['weather-severe-alert']
+        default:
+          return ['weather-severe-alert']
       }
-      let days = [];
-  
-      let parser = new Marknote.marknote.Parser();
-      let doc = parser.parse(rss);
-      if (!doc)  {
-        this.data.status.forecast = BBCWX_SERVICE_STATUS_ERROR;
-        this.data.status.meta = BBCWX_SERVICE_STATUS_ERROR;
-        return;
-      }
-      try {
-        let rootElem = doc.getRootElement();
-        let channel = rootElem.getChildElement("channel");
-        let location = channel.getChildElement("title").getText().split("Forecast for")[1].trim();
-        this.data.city = location.split(',')[0].trim();
-        this.data.country = location.split(',')[1].trim();
-        this.linkURL = channel.getChildElement("link").getText();
-        let items = channel.getChildElements("item");
-        let geo = items[0].getChildElement("georss:point").getText();
-        this.data.wgs84.lat = geo.split(' ')[0].trim();
-        this.data.wgs84.lon = geo.split(' ')[1].trim();
-        let desc, title;
-  
-        for (let i=0; i<items.length; i++) {
-          let data = new Object();
-          desc = items[i].getChildElement("description").getText();
-          title = items[i].getChildElement("title").getText();
-          data.link = items[i].getChildElement("link").getText();
-          data.day = title.split(':')[0].trim().substring(0,3);
-          let weathertext = title.split(':')[1].split(',')[0].trim();
-          let parts = desc.split(',');
-          let k, v;
-          for (let b=0; b<parts.length; b++) {
-            k = parts[b].slice(0, parts[b].indexOf(':')).trim().replace(' ', '_').toLowerCase();
-            v = parts[b].slice(parts[b].indexOf(':')+1).trim();
-            if (v.substr(0,4).toLowerCase() == 'null') v = '';
-            if (k == "wind_direction" && v != '') {
-              let vparts = v.split(" ");
-              v = '';
-              for (let c=0; c<vparts.length; c++) {
-                v += vparts[c].charAt(0).toUpperCase();
-              }
-            }
-            data[k] = v;
-          }
-          data.maximum_temperature = this._getTemperature(data.maximum_temperature);
-          data.minimum_temperature = this._getTemperature(data.minimum_temperature);
-          data.wind_speed = this._getWindspeed(data.wind_speed);
-          data.wind_direction = _(data.wind_direction);
-          data.pressure = data.pressure.replace('mb', '');
-          data.humidity = data.humidity.replace('%', '');
-          data.icon = this._getIconFromText(weathertext);
-          data.weathertext = _(weathertext);
-          this.data.days[i] = data;
-        }
-        this.data.status.forecast = BBCWX_SERVICE_STATUS_OK;
-        this.data.status.meta = BBCWX_SERVICE_STATUS_OK;
-      } catch(e) {
-        global.logError(e);
-        this.data.status.forecast = BBCWX_SERVICE_STATUS_ERROR;
-        this.data.status.meta = BBCWX_SERVICE_STATUS_ERROR;
-      }
-    },
-  
-    // take an rss feed of current observations and extract data into this.data
-    _load_observations: function (rss) {
-      if (!rss) {
-        this.data.status.cc = BBCWX_SERVICE_STATUS_ERROR;
-        return;
-      }
-      let parser = new Marknote.marknote.Parser();
-      let doc = parser.parse(rss);
-      if (!doc) {
-        this.data.status.cc = BBCWX_SERVICE_STATUS_ERROR;
-        return;
-      }
-      try {
-        let rootElem = doc.getRootElement();
-        let channel = rootElem.getChildElement("channel");
-        let item = channel.getChildElement("item");
-        let desc = item.getChildElement("description").getText();
-        let title = item.getChildElement("title").getText();
-        desc = desc.replace('mb,', 'mb|');
-        this.data.cc.weathertext = title.split(':')[2].split(',')[0].trim();
-        if (this.data.cc.weathertext.toLowerCase() == 'null') this.data.cc.weathertext = '';
-        let parts = desc.split(',');
-        for (let b=0; b<parts.length; b++) {
-          let k, v;
-          k = parts[b].slice(0, parts[b].indexOf(':')).trim().replace(' ', '_').toLowerCase();
-          v = parts[b].slice(parts[b].indexOf(':')+1).trim();
-          if (v.substr(0,4).toLowerCase() == 'null') v = '';
-          if (k == 'wind_direction' && v != '') {
-            let vparts = v.split(" ");
-            v = '';
-            for (let c=0; c<vparts.length; c++) {
-              v += vparts[c].charAt(0).toUpperCase();
-            }
-          }
-          if (k == 'pressure' && v != '') {
-            let pparts=v.split('|');
-            v = pparts[0].trim();
-            this.data.cc.pressure_direction = _(pparts[1].trim());
-          }
-          this.data.cc[k] = v;
-        }
-        this.data.cc.icon = this._getIconFromText(this.data.cc.weathertext);
-        this.data.cc.weathertext = _(this.data.cc.weathertext);
-        this.data.cc.temperature = this._getTemperature(this.data.cc.temperature);
-        this.data.cc.wind_speed = this._getWindspeed(this.data.cc.wind_speed);
-        this.data.cc.wind_direction = _(this.data.cc.wind_direction);
-        this.data.cc.humidity = this.data.cc.humidity.replace('%', '').replace('-- ', '');
-        this.data.cc.pressure = this.data.cc.pressure.replace('mb', '').replace('-- ', '');
-        this.data.status.cc = BBCWX_SERVICE_STATUS_OK;
-      } catch(e) {
-        global.logError(e);
-        this.data.status.cc = BBCWX_SERVICE_STATUS_ERROR;
-      }
-    },
-  
-    _getIconFromText: function(wxtext) {
-      let icon_name = 'na';
-      let iconmap = {
-        'clear sky' : '31', //night
-        'sunny' : '32',
-        'partly cloudy' : '29',  //night
-        'sunny intervals' : '30',
-        'sand storm' : '19', // not confirmed
-        'mist' : '20',
-        'fog' : '20',
-        'white cloud' : '26',
-        'light cloud' : '26',
-        'grey cloud' : '26d',
-        'thick cloud' : '26d',
-        'light rain shower' : '39',
-        'light rain showers' : '39',
-        'drizzle' : '09',
-        'light rain' : '11',
-        'heavy rain shower' : '39',
-        'heavy rain showers' : '39',
-        'heavy rain' : '12',
-        'sleet shower' : '07',
-        'sleet showers' : '07',
-        'sleet' : '07',
-        'light snow shower' : '41',
-        'light snow showers' : '41',
-        'light snow' : '13',
-        'heavy snow shower' : '41',
-        'heavy snow showers' : '41',
-        'heavy snow' : '16',
-        'thundery shower' : '37',
-        'thundery showers' : '37',
-        'thunder storm' : '04',
-        'thunderstorm' : '04',
-        'hazy' : '22',
-        'hail shower': '18',
-        'hail showers': '18'
-      }
-      if (wxtext) {
-        wxtext = wxtext.toLowerCase();
-        if (typeof iconmap[wxtext] !== "undefined") {
-          icon_name = iconmap[wxtext];
-        }
-      }
-      return icon_name;
-    },
-  
-    _getTemperature: function(temp) {
-      if (!temp) return '';
-      let celsius = temp.slice(0, temp.indexOf('C')-1).trim();
-      if (isNaN(celsius)) return '';
-      return celsius;
-    },
-  
-    _getWindspeed: function(wind) {
-      if (!wind) return '';
-      let mph = wind.replace('mph', '');
-      if (isNaN(mph)) return '';
-      let out = mph * 1.6;
-      return out;
-    },
-  
-    // dummy function that exists just to list the strings
-    // for translation
-    _dummy: function() {
-      let a =[
-        _('Clear Sky'),
-        _('Sunny'),
-        _('Partly Cloudy'),
-        _('Sunny Intervals'),
-        _('Sand Storm'),
-        _('Mist'),
-        _('Fog'),
-        _('White Cloud'),
-        _('Light Cloud'),
-        _('Grey Cloud'),
-        _('Thick Cloud'),
-        _('Light Rain Shower'),
-        _('Drizzle'),
-        _('Light Rain'),
-        _('Heavy Rain Shower'),
-        _('Heavy Rain'),
-        _('Sleet Shower'),
-        _('Sleet'),
-        _('Light Snow Shower'),
-        _('Light Snow'),
-        _('Heavy Snow Shower'),
-        _('Heavy Snow'),
-        _('Thundery Shower'),
-        _('Thunder Storm'),
-        _('Thunderstorm'),
-        _('Hazy'),
-        _('Hail Shower'),
-        _('Rain')             // not currently used;
-      ];
+    };
+
+    this.CtoK = function(celsius) {
+      return 273.15 + parseInt(celsius); 
     }
-  
-  };
-*/  
+};

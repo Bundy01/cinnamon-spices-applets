@@ -5,8 +5,9 @@
    For production use, use the minified copy, marknote.js, instead.
    
    This version of marknote has been modified for use in bbcwx, the Cinnamon Weather Desklet
+   This version of marknote has been modified for use in weather, the Cinnamon Weather Applet
    
-   marknote version 0.5.1.bbcwx
+   marknote version 0.5.2.weather
    XML DOM/Parser API
    
    Usage:
@@ -29,7 +30,7 @@
    See the License for the specific language governing permissions and
    limitations under the License. 
 */
-let marknote = function () {
+var marknote = function () {
 };
 marknote.constants = {DOCTYPE_START:"<!DOCTYPE", CDATA_START:"<![CDATA[", CDATA_END:"]]>", COMMENT_START:"<!--", COMMENT_END:"-->", TAG_OPEN:"<", TAG_CLOSE:">", TAG_CLOSE_SELF_TERMINATING:"/>", ENDTAG_OPEN:"</", EQUALS:"=", SQUOTE:"'", DQUOTE:"\"", PI_START:"<?", PI_END:"?>", BRACKET_OPEN:"[", BRACKET_CLOSE:"]", TOKENTYPE_BRACKET_OPEN:"bracketOpen", TOKENTYPE_TAG_OPEN:"tagOpen", TOKENTYPE_TAG_CLOSE:"tagClose", TOKENTYPE_ENDTAG_OPEN:"endTagOpen", TOKENTYPE_ENDTAG_CLOSE:"endTagClose", TOKENTYPE_SELF_TERMINATING:"closeTagSelfTerminating", TOKENTYPE_WHITESPACE:"whitespace", TOKENTYPE_ATTRIBUTE:"attribute", TOKENTYPE_QUOTE:"quote", TOKENTYPE_QUOTED:"quotedLiteral", TOKENTYPE_NORMAL:"normal", TOKENTYPE_COMMENT_START:"commentStart", TOKENTYPE_COMMENT_END:"commentEnd", TOKENTYPE_CDATA_START:"cdataStart", TOKENTYPE_CDATA_END:"cdataEnd", TOKENTYPE_PI_START:"piStart", TOKENTYPE_PI_END:"piEnd", TOKENTYPE_DOCTYPE_START:"docTypeStart", DATATYPE_ATTRIBUTE:"marknote.Attribute", DATATYPE_CDATA:"marknote.CDATA", DATATYPE_CLONER:"marknote.Cloner", DATATYPE_COMMENT:"marknote.Comment", DATATYPE_DOCTYPE:"marknote.DOCTYPE", DATATYPE_DOCUMENT:"marknote.Document", DATATYPE_ELEMENT:"marknote.Element", DATATYPE_ENTITYREF:"marknote.EntityRef", DATATYPE_XMLENTITYREFS:"marknote.XMLEntityRefs", DATATYPE_ENTITYREFS:"marknote.EntityRefs", DATATYPE_PARSER:"marknote.Parser", DATATYPE_PROCESSINGINSTRUCTION:"marknote.ProcessingInstruction", DATATYPE_QNAME:"marknote.QName", DATATYPE_TEXT:"marknote.Text", DATATYPE_TOKEN:"marknote.Token", DATATYPE_TOKENIZER:"marknote.Tokenizer", DATATYPE_WRITER:"marknote.Writer"};
 
