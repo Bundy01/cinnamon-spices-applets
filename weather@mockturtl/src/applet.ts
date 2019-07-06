@@ -1,66 +1,5 @@
 const DEBUG = false;
 
-interface Forecast {
-  dateTime: Date,             //Required
-  main: {
-    temp: number,
-    temp_min: number,           //Required
-    temp_max: number,           //Required
-    pressure?: number,
-    sea_level: number,
-    grnd_level: number,
-    humidity: number,
-  },
-  condition: {
-    id: string,
-    main: string,               //Required
-    description: string,        //Required
-    icon: string,               //Required
-  },
-  clouds: number,
-  wind: {
-    speed: number,
-    deg: number,
-  }
-}
-
-interface Weather {
-  dateTime: Date,
-  location: {
-    city: string,
-    country: string,
-    id: string,               // API Specific ID, not used
-    tzOffset: number,          // seconds
-    timeZone: string
-  },
-  coord: {
-    lat: 	number,
-    lon: number,
-  },
-  sunrise: Date,             // Date object, UTC
-  sunset: Date,              // Date object, UTC
-  wind: {
-    speed: number,             // MPS
-    degree: number,            // meteorlogical degrees
-  },
-  main: {
-    temperature: number,       // Kelvin
-    pressure: number,          // hPa
-    humidity: number,          // %
-    temp_min: number,          // Kelvin, not used
-    temp_max: number,          // Kelvin, not used
-    feelsLike: number          // kelvin
-  },
-  condition: {
-    id: string,                // ID, not used
-    main: string,              // What API returns
-    description: string,       // Longer description, if not available put the same whats in main
-    icon: string,              // GTK weather icon names
-  },
-  cloudiness: number,       
-}
-
-
 //----------------------------------
 // imports
 //----------------------------------
@@ -152,7 +91,7 @@ const WEATHER_WIND_SPEED_UNIT_KEY = 'windSpeedUnit'
 const WEATHER_SHORT_CONDITIONS_KEY = 'shortConditions'
 const WEATHER_MANUAL_LOCATION = "manualLocation"
 
-const KEYS = [,
+const KEYS: string[] = [,
   WEATHER_DATA_SERVICE,
   WEATHER_API_KEY,
   WEATHER_TEMPERATURE_UNIT_KEY,
@@ -1410,3 +1349,97 @@ function main(metadata: any, orientation: string, panelHeight: number, instanceI
   return new MyApplet(metadata, orientation, panelHeight, instanceId);
 }
 
+
+
+interface Forecast {
+  dateTime: Date,             
+  main: {
+    /** Currently not in use, Kelvin */
+    temp?: number,
+    /** Kelvin */
+    temp_min: number, 
+    /** Kelvin */          
+    temp_max: number,           
+    /** Currently not in use */
+    pressure?: number,
+    /** Currently not in use */
+    sea_level?: number,
+    /** Currently not in use */
+    grnd_level?: number,
+    /** Currently not in use */
+    humidity?: number,
+  },
+  condition: {
+    /** API specific condition ID, not used */
+    id?: string,
+    /** Usually short description */
+    main: string,
+    /** Longer descrription */     
+    description: string,        
+    /** GTK Icon name  */
+    icon: string,               
+  },
+  /** Percent, not used */
+  clouds?: number,
+  /** Not used */
+  wind?: {
+    /** Meters per sec */
+    speed: number,
+    /** Meteorological degrees */
+    deg: number,
+  }
+}
+
+interface Weather {
+  dateTime: Date,
+  location: {
+    city: string,
+    country: string,
+    /** APi specific ID, Not used */
+    id?: string,
+    /** In seconds */
+    tzOffset?: number,          
+    /** Timezone string. If this is null, tzOffset needs to be calculated */
+    timeZone?: string
+  },
+  coord: {
+    lat: 	number,
+    lon: number,
+  },
+  /** UTC */
+  sunrise: Date,
+  /** UTC */
+  sunset: Date,
+  wind: {
+    /** meter per second */
+    speed: number, 
+    /** Meteoroligal degrees */
+    degree: number,            
+  },
+  main: {
+    /** Kelvin */
+    temperature: number,
+    /** hPa */
+    pressure: number,
+    /** Percent */
+    humidity: number,
+    /** Kelvin, not used */
+    temp_min?: number,
+    /** Kelvin, not ised */
+    temp_max?: number,
+    /** Kelvin, used in DarkSky */
+    feelsLike?: number
+  },
+  condition: {
+    /** Not used */
+    id?: string,
+    /** Usually short description */
+    main: string,
+    /** Longer descrription */     
+    description: string,        
+    /** GTK Icon name  */
+    icon: string,        
+  },
+  /** Percent, used in OpenWeatherMap */
+  cloudiness?: number,       
+}
