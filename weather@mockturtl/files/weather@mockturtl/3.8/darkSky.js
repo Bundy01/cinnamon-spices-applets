@@ -18,10 +18,6 @@ class DarkSky {
             this.app.log.Debug("DarkSky API query: " + query);
             try {
                 json = await this.app.LoadJsonAsync(query);
-                if (json == null) {
-                    this.app.showError(this.app.errMsg.label.service, this.app.errMsg.desc.noResponse);
-                    return false;
-                }
             }
             catch (e) {
                 this.app.log.Error("DarkSky: API call failed: " + e);

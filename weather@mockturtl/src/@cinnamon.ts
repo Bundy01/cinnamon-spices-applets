@@ -176,7 +176,7 @@ declare class global {
              * Base applet class that other applets can inherit
              */
             export class Applet {
-
+                
             }
 
             export class TextIconApplet {
@@ -187,6 +187,7 @@ declare class global {
                 set_applet_tooltip(text: string): void;
                 setAllowedLayout(text: string): void;
                 hide_applet_label(hide: boolean): void;
+                _applet_context_menu: AppletContextMenu;
             }
 
             /**
@@ -202,6 +203,10 @@ declare class global {
 
                 _onOrientationChanged(a: any, orientation: string): void;
                 _onOpenStateChanged(menu: any, open: any, sourceActor: any): void;
+                addActor(element: imports.gi.St.BoxLayout): void;
+                setCustomStyleClass(className: string): void;
+                toggle(): void;
+                actor: imports.gi.St.BoxLayout;
             }
 
             /**
@@ -216,13 +221,14 @@ declare class global {
                 constructor(launcher: any, orientation: string);
 
                 _onOpenStateChanged(menu: any, open: any, sourceActor: any): void;
+                addMenuItem(item: MenuItem): void;
             }
             /**
              * #MenuItem
              * @short_description: Deprecated. Use #PopupMenu.PopupIconMenuItem instead.
              */
             export class MenuItem {
-                constructor(itemLabel: string, GTKEdit: any, binding: Function);
+                constructor(itemLabel: string, GTKEditIcon: any, binding: () => void);
             }
 
             export interface AllowedLayouts {
@@ -235,25 +241,30 @@ declare class global {
         export module popupMenu {
             export class PopupMenuManager {
                 constructor(context: any);
+                addMenu(menu: imports.ui.applet.AppletPopupMenu): void;
             }
             export class PopupMenu {
                 constructor();
             }
             export class PopupIconMenuItem {
-
+                constructor(itemLabel: string, GTKEditIcon: any, binding: () => void);
             }
         }
         export module settings {
             export class AppletSettings {
                 constructor(context: any, UUID: string, instanceID: number);
+
+                bindProperty(direction: BindingDirection, settingName: string, varToBindName: string, callback: () => any, something: any): void;
+                connect(key: string, callback: () => any): void;
+                getValue(key: string): imports.gi.St.IconType;
+                setValue(key: string, value: any): void;
             }
 
-            export interface BindingDirections {
-                IN: string,
-                BIDIRECTIONAL: string,
-                OUT: string
+            export enum BindingDirection {
+                IN,
+                BIDIRECTIONAL,
+                OUT
             }
-            export const BindingDirection: BindingDirections
         }
         export module appletManager {
             export var applets: any;
@@ -306,14 +317,20 @@ declare class global {
         export module St {
             export class BoxLayout {
                 constructor(options?: any)
-                add_actor(element: Button | Label | Icon | BoxLayout): void;
+                add_actor(element: any): void;
+                add_style_class_name(className: string): void;
             }
             export class Bin {
-                constructor(options?: any)
+                constructor(options?: any);
+                get_child(): any;
+                set_child(element: any): any;
             }
             export class DrawingArea {
-                constructor(options?: any)
+                constructor(options?: any);
+                connect(key: string, callback:() => void): void;
+                width: number;
             }
+
             export class Label {
                 text: string;
                 constructor(options?: any);
@@ -328,20 +345,20 @@ declare class global {
             export class Button {
                 reactive: boolean;
                 label: string;
+                style_class: string;
+                url: string;
+                connect(key: string, callback:() => void): void;
                 constructor(options?: any);
             }
 
-            export interface Sides {
-                LEFT: string,
-                RIGHT: string
+            export enum Side {
+                LEFT,
+                RIGHT
             }
-            export interface IconTypes {
-                SYMBOLIC: string,
-                FULLCOLOR: string
+            export enum IconType {
+                SYMBOLIC,
+                FULLCOLOR
             }
-
-            export const Side: Sides;
-            export const IconType: IconTypes;
         }
         export module GLib {
             export function get_home_dir(): string;

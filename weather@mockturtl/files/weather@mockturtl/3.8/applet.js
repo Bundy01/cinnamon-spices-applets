@@ -211,58 +211,20 @@ class MyApplet extends Applet.TextIconApplet {
         this._httpSession = new Soup.SessionAsync();
         this.locProvider = new ipApi.IpApi(this);
         this.lastUpdated = null;
+        this.orientation = orientation;
         this.currentLocale = GLib.get_language_names()[0];
         this.systemLanguage = this.currentLocale.split('_')[0];
         this.settings = new Settings.AppletSettings(this, UUID, instanceId);
         this.log = new Log(instanceId);
         this._httpSession.user_agent = "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:37.0) Gecko/20100101 Firefox/37.0";
         Soup.Session.prototype.add_feature.call(this._httpSession, new Soup.ProxyResolverDefault());
-        this.set_applet_icon_name(APPLET_ICON);
-        this.set_applet_label(_("..."));
-        this.set_applet_tooltip(_("Click to open"));
-        this.menuManager = new PopupMenu.PopupMenuManager(this);
-        this.menu = new Applet.AppletPopupMenu(this, orientation);
-        if (typeof this.menu.setCustomStyleClass === "function")
-            this.menu.setCustomStyleClass(STYLE_WEATHER_MENU);
-        else
-            this.menu.actor.add_style_class_name(STYLE_WEATHER_MENU);
-        this.menuManager.addMenu(this.menu);
-        for (let k in KEYS) {
-            let key = KEYS[k];
-            let keyProp = "_" + key;
-            this.settings.bindProperty(Settings.BindingDirection.IN, key, keyProp, this.refreshAndRebuild, null);
-        }
-        this.settings.bindProperty(Settings.BindingDirection.BIDIRECTIONAL, WEATHER_LOCATION, ("_" + WEATHER_LOCATION), this.refreshAndRebuild, null);
-        this.settings.bindProperty(Settings.BindingDirection.IN, "keybinding", "keybinding", this._onKeySettingsUpdated, null);
-        Main.keybindingManager.addHotKey(UUID, this.keybinding, Lang.bind(this, this.on_applet_clicked));
-        this.updateIconType();
-        this.settings.connect(SIGNAL_CHANGED + WEATHER_USE_SYMBOLIC_ICONS_KEY, Lang.bind(this, function () {
-            this.updateIconType();
-            this._applet_icon.icon_type = this._icon_type;
-            this._currentWeatherIcon.icon_type = this._icon_type;
-            for (let i = 0; i < this._forecastDays; i++) {
-                this._forecast[i].Icon.icon_type = this._icon_type;
-            }
-            this.refreshWeather();
-        }));
-        let itemLabel = _("Refresh");
-        let refreshMenuItem = new Applet.MenuItem(itemLabel, REFRESH_ICON, Lang.bind(this, function () {
-            this.refreshWeather();
-        }));
-        this._applet_context_menu.addMenuItem(refreshMenuItem);
-        let mainBox = new St.BoxLayout({ vertical: true });
-        this.menu.addActor(mainBox);
-        this._currentWeather = new St.Bin({ style_class: STYLE_CURRENT });
-        mainBox.add_actor(this._currentWeather);
-        this._separatorArea = new St.DrawingArea({ style_class: STYLE_POPUP_SEPARATOR_MENU_ITEM });
-        this._separatorArea.width = 200;
-        this._separatorArea.connect(SIGNAL_REPAINT, Lang.bind(this, this._onSeparatorAreaRepaint));
-        mainBox.add_actor(this._separatorArea);
-        this._futureWeather = new St.Bin({ style_class: STYLE_FORECAST });
-        mainBox.add_actor(this._futureWeather);
-        this.rebuild();
-        this.refreshLoop();
-        this.orientation = orientation;
+        this.BuildTaskBar();
+        this.AddPopupMenu();
+        this.BindSettings();
+        this.AddRefreshButton();
+        this.BuildPopupMenuBase();
+        this.RebuildPopupMenu();
+        this.RunMainLoop();
         try {
             this.setAllowedLayout(Applet.AllowedLayout.BOTH);
             this.update_label_visible();
@@ -270,46 +232,10 @@ class MyApplet extends Applet.TextIconApplet {
         catch (e) {
         }
     }
-    refreshAndRebuild() {
-        this.refreshWeather();
-    }
-    ;
-    async LoadJsonAsync(query) {
-        let json = await new Promise((resolve, reject) => {
-            let message = Soup.Message.new('GET', query);
-            this._httpSession.queue_message(message, (session, message) => {
-                if (message) {
-                    try {
-                        if (message.status_code != 200) {
-                            reject("http response Code: " + message.status_code + ", reason: " + message.reason_phrase);
-                            return;
-                        }
-                        this.log.Debug("API full response: " + message.response_body.data.toString());
-                        let payload = JSON.parse(message.response_body.data);
-                        resolve(payload);
-                    }
-                    catch (e) {
-                        this.log.Error("Error: API response is not JSON. The response: " + message.response_body.data);
-                        reject(e);
-                    }
-                }
-                else {
-                    this.log.Error("Error: No Response from API");
-                    reject(null);
-                }
-            });
-        });
-        return json;
-    }
-    ;
-    async locationLookup() {
-        let command = "xdg-open ";
-        Util.spawnCommandLine(command + "https://cinnamon-spices.linuxmint.com/applets/view/17");
-    }
-    refreshLoop() {
+    RunMainLoop() {
         try {
             if (this.lastUpdated == null || new Date(this.lastUpdated.getTime() + this._refreshInterval * 60000) < new Date()) {
-                this.refreshWeather();
+                this.RefreshWeather(false);
             }
         }
         catch (e) {
@@ -317,10 +243,14 @@ class MyApplet extends Applet.TextIconApplet {
             this.lastUpdated = null;
         }
         Mainloop.timeout_add_seconds(15, Lang.bind(this, function mainloopTimeout() {
-            this.refreshLoop();
+            this.RunRefreshLoop();
         }));
     }
     ;
+    async locationLookup() {
+        let command = "xdg-open ";
+        Util.spawnCommandLine(command + "https://cinnamon-spices.linuxmint.com/applets/view/17");
+    }
     update_label_visible() {
         if (this.orientation == St.Side.LEFT || this.orientation == St.Side.RIGHT)
             this.hide_applet_label(true);
@@ -330,18 +260,18 @@ class MyApplet extends Applet.TextIconApplet {
     ;
     on_orientation_changed(orientation) {
         this.orientation = orientation;
-        this.refreshWeather();
+        this.RefreshAndRebuild();
     }
     ;
-    _onKeySettingsUpdated() {
+    on_applet_clicked(event) {
+        this.menu.toggle();
+    }
+    OnKeySettingsUpdated() {
         if (this.keybinding != null) {
             Main.keybindingManager.addHotKey(UUID, this.keybinding, Lang.bind(this, this.on_applet_clicked));
         }
     }
-    on_applet_clicked(event) {
-        this.menu.toggle();
-    }
-    _onSeparatorAreaRepaint(area) {
+    OnSeparatorAreaRepaint(area) {
         let cr = area.get_context();
         let themeNode = area.get_theme_node();
         let [width, height] = area.get_surface_size();
@@ -360,66 +290,22 @@ class MyApplet extends Applet.TextIconApplet {
         cr.fill();
     }
     ;
-    updateIconType() {
-        this._icon_type = this.settings.getValue(WEATHER_USE_SYMBOLIC_ICONS_KEY) ?
-            St.IconType.SYMBOLIC :
-            St.IconType.FULLCOLOR;
-    }
-    ;
-    showError(title, msg) {
-        this.set_applet_label(title);
-        this.set_applet_tooltip("Click to open");
-        this.set_applet_icon_name("weather-severe-alert");
-        this._currentWeatherSunrise.text = msg;
-    }
-    ;
-    async refreshWeather() {
-        this.wipeCurrentData();
-        this.wipeForecastData();
+    async RefreshWeather(rebuild) {
+        this.WipeCurrentData();
+        this.WipeForecastData();
         try {
-            if (!this._manualLocation) {
-                let haveLocation = await this.locProvider.GetLocation();
-                if (!haveLocation) {
-                    this.log.Error("Couldn't obtain location, retry in 15 seconds...");
-                    this.showError(this.errMsg.label.noLoc, this.errMsg.desc.cantGetLoc);
-                    this.lastUpdated = null;
-                    return;
-                }
-            }
-            else {
-                let loc = this._location.replace(" ", "");
-                if (loc == undefined || loc == "") {
-                    this.showError(this.errMsg.label.noLoc, "");
-                    this.log.Error("No location given when setting is on Manual Location");
-                    return;
-                }
-            }
-            let refreshResult;
-            switch (this._dataService) {
-                case DATA_SERVICE.DARK_SKY:
-                    if (darkSky == null) {
-                        darkSky = require('./darkSky');
-                    }
-                    this.provider = new darkSky.DarkSky(this);
-                    refreshResult = await this.provider.GetWeather();
-                    break;
-                case DATA_SERVICE.OPEN_WEATHER_MAP:
-                    if (openWeatherMap == null) {
-                        openWeatherMap = require('./openWeatherMap');
-                    }
-                    this.provider = new openWeatherMap.OpenWeatherMap(this);
-                    refreshResult = await this.provider.GetWeather();
-                    break;
-                default:
-                    return;
-            }
+            if (!this.VerifyLocation())
+                return;
+            this.InitWeatherProvider();
+            let refreshResult = await this.provider.GetWeather();
             if (!refreshResult) {
                 this.log.Error("Unable to obtain Weather Information");
                 this.lastUpdated = null;
                 return;
             }
-            this.rebuild();
-            if (await this.displayWeather() && await this.displayForecast()) {
+            if (rebuild)
+                this.RebuildPopupMenu();
+            if (this.DisplayWeather() && this.DisplayForecasts()) {
                 this.log.Print("Weather Information refreshed");
             }
         }
@@ -432,7 +318,56 @@ class MyApplet extends Applet.TextIconApplet {
         return;
     }
     ;
-    displayWeather() {
+    InitWeatherProvider() {
+        switch (this._dataService) {
+            case DATA_SERVICE.DARK_SKY:
+                if (!darkSky)
+                    darkSky = require('./darkSky');
+                if (!this.provider || !(this.provider instanceof darkSky.DarkSky))
+                    this.provider = new darkSky.DarkSky(this);
+                break;
+            case DATA_SERVICE.OPEN_WEATHER_MAP:
+                if (!openWeatherMap)
+                    openWeatherMap = require('./openWeatherMap');
+                if (!this.provider || !(this.provider instanceof openWeatherMap.OpenWeatherMap))
+                    this.provider = new openWeatherMap.OpenWeatherMap(this);
+                break;
+            default:
+                return;
+        }
+    }
+    async VerifyLocation() {
+        if (!this._manualLocation) {
+            let haveLocation = await this.locProvider.GetLocation();
+            if (!haveLocation) {
+                this.log.Error("Couldn't obtain location");
+                this.lastUpdated = null;
+                return false;
+            }
+        }
+        else {
+            let loc = this._location.replace(" ", "");
+            if (loc == undefined || loc == "") {
+                this.showError(this.errMsg.label.noLoc, "");
+                this.log.Error("No location given when setting is on Manual Location");
+                return false;
+            }
+        }
+        return true;
+    }
+    showError(title, msg) {
+        this.RebuildPopupMenu();
+        this.set_applet_label(title);
+        this.set_applet_tooltip("Click to open");
+        this.set_applet_icon_name("weather-severe-alert");
+        this._currentWeatherSunrise.text = msg;
+    }
+    ;
+    RefreshAndRebuild() {
+        this.RefreshWeather(true);
+    }
+    ;
+    DisplayWeather() {
         try {
             let mainCondition = "";
             let descriptionCondition = "";
@@ -532,8 +467,16 @@ class MyApplet extends Applet.TextIconApplet {
                     sunriseText = _('Sunrise');
                     sunsetText = _('Sunset');
                     if (this.weather.location.timeZone != null) {
-                        let sunrise = this.weather.sunrise.toLocaleString("en-GB", { timeZone: this.weather.location.timeZone, hour: "2-digit", minute: "2-digit" });
-                        let sunset = this.weather.sunset.toLocaleString("en-GB", { timeZone: this.weather.location.timeZone, hour: "2-digit", minute: "2-digit" });
+                        let sunrise = this.weather.sunrise.toLocaleString("en-GB", {
+                            timeZone: this.weather.location.timeZone,
+                            hour: "2-digit",
+                            minute: "2-digit"
+                        });
+                        let sunset = this.weather.sunset.toLocaleString("en-GB", {
+                            timeZone: this.weather.location.timeZone,
+                            hour: "2-digit",
+                            minute: "2-digit"
+                        });
                         sunriseText = (sunriseText + ': ' + this.timeToUserUnits(sunrise));
                         sunsetText = (sunsetText + ': ' + this.timeToUserUnits(sunset));
                     }
@@ -553,7 +496,7 @@ class MyApplet extends Applet.TextIconApplet {
         }
     }
     ;
-    displayForecast() {
+    DisplayForecasts() {
         try {
             for (let i = 0; i < this._forecast.length; i++) {
                 let forecastData = this.forecasts[i];
@@ -579,8 +522,13 @@ class MyApplet extends Applet.TextIconApplet {
                 }
                 let dayName = "";
                 if (this.weather.location.timeZone != null) {
-                    this.log.Debug(forecastData.dateTime.toLocaleString("en-GB", { timeZone: this.weather.location.timeZone }));
-                    dayName = _(forecastData.dateTime.toLocaleString("en-GB", { timeZone: this.weather.location.timeZone, weekday: "long" }));
+                    this.log.Debug(forecastData.dateTime.toLocaleString("en-GB", {
+                        timeZone: this.weather.location.timeZone
+                    }));
+                    dayName = _(forecastData.dateTime.toLocaleString("en-GB", {
+                        timeZone: this.weather.location.timeZone,
+                        weekday: "long"
+                    }));
                 }
                 else {
                     forecastData.dateTime.setMilliseconds(forecastData.dateTime.getMilliseconds() + (this.weather.location.tzOffset * 1000));
@@ -606,7 +554,7 @@ class MyApplet extends Applet.TextIconApplet {
         }
     }
     ;
-    wipeCurrentData() {
+    WipeCurrentData() {
         this.weather.dateTime = null;
         this.weather.location.city = null;
         this.weather.location.country = null;
@@ -631,31 +579,102 @@ class MyApplet extends Applet.TextIconApplet {
         this.weather.cloudiness = null;
     }
     ;
-    wipeForecastData() {
+    WipeForecastData() {
         this.forecasts = [];
     }
     ;
-    destroyCurrentWeather() {
+    BuildTaskBar() {
+        this.set_applet_icon_name(APPLET_ICON);
+        this.set_applet_label(_("..."));
+        this.set_applet_tooltip(_("Click to open"));
+    }
+    AddPopupMenu() {
+        this.menuManager = new PopupMenu.PopupMenuManager(this);
+        this.menu = new Applet.AppletPopupMenu(this, this.orientation);
+        if (typeof this.menu.setCustomStyleClass === "function")
+            this.menu.setCustomStyleClass(STYLE_WEATHER_MENU);
+        else
+            this.menu.actor.add_style_class_name(STYLE_WEATHER_MENU);
+        this.menuManager.addMenu(this.menu);
+    }
+    BindSettings() {
+        for (let k in KEYS) {
+            let key = KEYS[k];
+            let keyProp = "_" + key;
+            this.settings.bindProperty(Settings.BindingDirection.IN, key, keyProp, this.RefreshAndRebuild, null);
+        }
+        this.settings.bindProperty(Settings.BindingDirection.BIDIRECTIONAL, WEATHER_LOCATION, ("_" + WEATHER_LOCATION), this.RefreshAndRebuild, null);
+        this.settings.bindProperty(Settings.BindingDirection.IN, "keybinding", "keybinding", this.OnKeySettingsUpdated, null);
+        Main.keybindingManager.addHotKey(UUID, this.keybinding, Lang.bind(this, this.on_applet_clicked));
+        this.updateIconType();
+        this.settings.connect(SIGNAL_CHANGED + WEATHER_USE_SYMBOLIC_ICONS_KEY, Lang.bind(this, function () {
+            this.updateIconType();
+            this._applet_icon.icon_type = this._icon_type;
+            this._currentWeatherIcon.icon_type = this._icon_type;
+            for (let i = 0; i < this._forecastDays; i++) {
+                this._forecast[i].Icon.icon_type = this._icon_type;
+            }
+            this.RefreshAndRebuild();
+        }));
+    }
+    AddRefreshButton() {
+        let itemLabel = _("Refresh");
+        let refreshMenuItem = new PopupMenu.PopupIconMenuItem(itemLabel, REFRESH_ICON, Lang.bind(this, function () {
+            this.RefreshWeather(false);
+        }));
+        this._applet_context_menu.addMenuItem(refreshMenuItem);
+    }
+    BuildPopupMenuBase() {
+        let mainBox = new St.BoxLayout({
+            vertical: true
+        });
+        this.menu.addActor(mainBox);
+        this._currentWeather = new St.Bin({
+            style_class: STYLE_CURRENT
+        });
+        mainBox.add_actor(this._currentWeather);
+        this._separatorArea = new St.DrawingArea({
+            style_class: STYLE_POPUP_SEPARATOR_MENU_ITEM
+        });
+        this._separatorArea.width = 200;
+        this._separatorArea.connect(SIGNAL_REPAINT, Lang.bind(this, this.OnSeparatorAreaRepaint));
+        mainBox.add_actor(this._separatorArea);
+        this._futureWeather = new St.Bin({
+            style_class: STYLE_FORECAST
+        });
+        mainBox.add_actor(this._futureWeather);
+    }
+    updateIconType() {
+        this._icon_type = this.settings.getValue(WEATHER_USE_SYMBOLIC_ICONS_KEY) ?
+            St.IconType.SYMBOLIC :
+            St.IconType.FULLCOLOR;
+    }
+    ;
+    RebuildPopupMenu() {
+        this.ShowLoadingUi();
+        this.BuildCurrentWeatherUi();
+        this.BuildFutureWeatherUi();
+    }
+    DestroyCurrentWeatherUI() {
         if (this._currentWeather.get_child() != null)
             this._currentWeather.get_child().destroy();
     }
-    destroyFutureWeather() {
+    DestroyFutureWeatherUI() {
         if (this._futureWeather.get_child() != null)
             this._futureWeather.get_child().destroy();
     }
-    showLoadingUi() {
-        this.destroyCurrentWeather();
-        this.destroyFutureWeather();
-        this._currentWeather.set_child(new St.Label({ text: _('Loading current weather ...') }));
-        this._futureWeather.set_child(new St.Label({ text: _('Loading future weather ...') }));
+    ShowLoadingUi() {
+        this.DestroyCurrentWeatherUI();
+        this.DestroyFutureWeatherUI();
+        this._currentWeather.set_child(new St.Label({
+            text: _('Loading current weather ...')
+        }));
+        this._futureWeather.set_child(new St.Label({
+            text: _('Loading future weather ...')
+        }));
     }
-    rebuild() {
-        this.showLoadingUi();
-        this.rebuildCurrentWeatherUi();
-        this.rebuildFutureWeatherUi();
-    }
-    rebuildCurrentWeatherUi() {
-        this.destroyCurrentWeather();
+    BuildCurrentWeatherUi() {
+        this.DestroyCurrentWeatherUI();
         this._currentWeatherIcon = new St.Icon({
             icon_type: this._icon_type,
             icon_size: 64,
@@ -673,7 +692,7 @@ class MyApplet extends Applet.TextIconApplet {
         this._currentWeatherLocation.style_class = STYLE_LOCATION_LINK;
         this._currentWeatherLocation.connect(SIGNAL_CLICKED, Lang.bind(this, function () {
             if (this._currentWeatherLocation.url == null) {
-                this.refreshWeather();
+                this.RefreshAndRebuild();
             }
             else {
                 Gio.app_info_launch_default_for_uri(this._currentWeatherLocation.url, global.create_app_launch_context());
@@ -685,25 +704,35 @@ class MyApplet extends Applet.TextIconApplet {
         });
         bb.add_actor(this._currentWeatherLocation);
         bb.add_actor(this._currentWeatherSummary);
-        let textOb = { text: ELLIPSIS };
+        let textOb = {
+            text: ELLIPSIS
+        };
         this._currentWeatherSunrise = new St.Label(textOb);
         this._currentWeatherSunset = new St.Label(textOb);
         let ab = new St.BoxLayout({
             style_class: STYLE_ASTRONOMY
         });
         ab.add_actor(this._currentWeatherSunrise);
-        let ab_spacerlabel = new St.Label({ text: BLANK });
+        let ab_spacerlabel = new St.Label({
+            text: BLANK
+        });
         ab.add_actor(ab_spacerlabel);
         ab.add_actor(this._currentWeatherSunset);
-        let bb_spacerlabel = new St.Label({ text: BLANK });
+        let bb_spacerlabel = new St.Label({
+            text: BLANK
+        });
         bb.add_actor(bb_spacerlabel);
         bb.add_actor(ab);
         this._currentWeatherTemperature = new St.Label(textOb);
         this._currentWeatherHumidity = new St.Label(textOb);
         this._currentWeatherPressure = new St.Label(textOb);
         this._currentWeatherWind = new St.Label(textOb);
-        this._currentWeatherApiUnique = new St.Label({ text: '' });
-        this._currentWeatherApiUniqueCap = new St.Label({ text: '' });
+        this._currentWeatherApiUnique = new St.Label({
+            text: ''
+        });
+        this._currentWeatherApiUniqueCap = new St.Label({
+            text: ''
+        });
         let rb = new St.BoxLayout({
             style_class: STYLE_DATABOX
         });
@@ -717,13 +746,21 @@ class MyApplet extends Applet.TextIconApplet {
         });
         rb.add_actor(rb_captions);
         rb.add_actor(rb_values);
-        rb_captions.add_actor(new St.Label({ text: _('Temperature:') }));
+        rb_captions.add_actor(new St.Label({
+            text: _('Temperature:')
+        }));
         rb_values.add_actor(this._currentWeatherTemperature);
-        rb_captions.add_actor(new St.Label({ text: _('Humidity:') }));
+        rb_captions.add_actor(new St.Label({
+            text: _('Humidity:')
+        }));
         rb_values.add_actor(this._currentWeatherHumidity);
-        rb_captions.add_actor(new St.Label({ text: _('Pressure:') }));
+        rb_captions.add_actor(new St.Label({
+            text: _('Pressure:')
+        }));
         rb_values.add_actor(this._currentWeatherPressure);
-        rb_captions.add_actor(new St.Label({ text: _('Wind:') }));
+        rb_captions.add_actor(new St.Label({
+            text: _('Wind:')
+        }));
         rb_values.add_actor(this._currentWeatherWind);
         rb_captions.add_actor(this._currentWeatherApiUniqueCap);
         rb_values.add_actor(this._currentWeatherApiUnique);
@@ -738,10 +775,12 @@ class MyApplet extends Applet.TextIconApplet {
         this._currentWeather.set_child(box);
     }
     ;
-    rebuildFutureWeatherUi() {
-        this.destroyFutureWeather();
+    BuildFutureWeatherUi() {
+        this.DestroyFutureWeatherUI();
         this._forecast = [];
-        this._forecastBox = new St.BoxLayout({ vertical: this._verticalOrientation });
+        this._forecastBox = new St.BoxLayout({
+            vertical: this._verticalOrientation
+        });
         this._futureWeather.set_child(this._forecastBox);
         for (let i = 0; i < this._forecastDays; i++) {
             let forecastWeather = {
@@ -781,6 +820,34 @@ class MyApplet extends Applet.TextIconApplet {
             this._forecastBox.add_actor(bb);
         }
     }
+    async LoadJsonAsync(query) {
+        let json = await new Promise((resolve, reject) => {
+            let message = Soup.Message.new('GET', query);
+            this._httpSession.queue_message(message, (session, message) => {
+                if (message) {
+                    try {
+                        if (message.status_code != 200) {
+                            reject({ code: message.status_code, reason: message.reason_phrase });
+                            return;
+                        }
+                        this.log.Debug("API full response: " + message.response_body.data.toString());
+                        let payload = JSON.parse(message.response_body.data);
+                        resolve(payload);
+                    }
+                    catch (e) {
+                        this.log.Error("Error: API response is not JSON. The response: " + message.response_body.data);
+                        reject({ code: 1000, reason: e });
+                    }
+                }
+                else {
+                    this.log.Error("Error: No Response from API");
+                    reject({ code: 0, reason: "No response" });
+                }
+            });
+        });
+        return json;
+    }
+    ;
     toLocaleFormat(date, format) {
         return Cinnamon.util_format_date(format, date.getTime());
     }
